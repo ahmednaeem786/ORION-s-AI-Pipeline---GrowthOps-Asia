@@ -1,0 +1,13 @@
+{
+    "submission_id": "SUB-COINBASE-2026",
+    "applicant": {
+        "company_name": "Coinbase Global, Inc.",
+        "jurisdiction": "United States",
+        "key_executives": ["Brian Armstrong", "Emilie Choi"],
+        "declared_activities": ["Cryptocurrency Exchange", "Digital Asset Custody", "Payment Processing"],
+        "employee_count": 3400
+    },
+    "document_uris": [
+        "local://data/raw/coinbase_10k_2024.txt"
+    ]
+}
