@@ -5,6 +5,7 @@ from schemas import SubmissionInput, ReviewerPayload
 from parser import DocumentParser
 from llm import LLMEngine
 from scoring import RiskScorer
+from api_client import ReviewAPIClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -18,6 +19,7 @@ class OrionPipeline:
         self.parser = DocumentParser()
         self.llm = LLMEngine(model_name=llm_model)
         self.scorer = RiskScorer()
+        self.api_client = ReviewAPIClient()
 
     def process_submission(self, submission_file: str) -> ReviewerPayload:
         start_time = time.time()
@@ -57,6 +59,8 @@ class OrionPipeline:
             recommended_authorization_level=auth_level,
             follow_up_questions=follow_ups
         )
+        # 7. Emit the final payload to the review API
+        self.api_client.emit_result(output_payload)
 
         elapsed = round(time.time() - start_time, 2)
         logger.info(f"Pipeline finished for {submission_data.submission_id} in {elapsed}s with authorization verdict: '{auth_level}'.")
