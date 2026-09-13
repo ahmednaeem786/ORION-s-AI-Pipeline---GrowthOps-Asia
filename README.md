@@ -24,6 +24,68 @@ flowchart LR
     D --> F[Audit Log\nrun ID + hashes + model metadata]
 ```
 
+## Pipeline Sequence
+
+The sequence below maps the executable call path from `python -m src.pipeline` to the final review API request. The `schemas.py` participant represents Pydantic validation rather than an active service or network call.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor Operator
+  participant Main as src/pipeline.py
+  participant Pipeline as OrionPipeline
+  participant Schemas as src/schemas.py
+  participant Parser as src/parser.py
+  participant LLM as src/llm.py
+  participant Gemini as Gemini API
+  participant Scoring as src/scoring.py
+  participant ReviewAPI as src/api_client.py
+  participant Webhook as External review API
+
+  Operator->>Main: Run python -m src.pipeline
+  Main->>Pipeline: OrionPipeline()
+  Pipeline->>LLM: LLMEngine(model_name)
+  LLM->>LLM: load_dotenv() and read GEMINI_API_KEY
+  Pipeline->>Parser: DocumentParser()
+  Pipeline->>Scoring: RiskScorer()
+  Pipeline->>ReviewAPI: ReviewAPIClient()
+
+  Main->>Pipeline: process_submission(submission_file)
+  Pipeline->>Pipeline: open() and json.load(submission_file)
+  Pipeline->>Schemas: SubmissionInput(**raw_json)
+  Schemas-->>Pipeline: Validated submission metadata and document_uris
+  Pipeline->>Pipeline: Resolve first document URI
+  Pipeline->>Parser: process_document(resolved_path)
+  Parser->>Parser: open() and read raw document
+  Parser->>Parser: extract_item_1a(raw_text)
+  Parser->>Parser: Select longest Item 1A to Item 1B match
+  Parser-->>Pipeline: Filtered and token-bounded text
+
+  Pipeline->>LLM: extract_risks(text, company_name)
+  LLM->>Gemini: generate_content(text, response_schema=RiskExtraction)
+  Gemini-->>LLM: Structured JSON response
+  LLM->>Schemas: Parse extracted DimensionRisk items
+  Schemas-->>LLM: Validated risk dimensions
+  LLM-->>Pipeline: list[DimensionRisk]
+
+  Pipeline->>Scoring: calculate_composite_score(dimension_risks)
+  Scoring->>Scoring: Apply risk weights and dimension weights
+  Scoring-->>Pipeline: composite_score
+  Pipeline->>Scoring: determine_authorization_level(score)
+  Scoring-->>Pipeline: authorization recommendation
+  Pipeline->>Scoring: generate_follow_ups(dimension_risks)
+  Scoring-->>Pipeline: follow_up_questions
+
+  Pipeline->>Schemas: ReviewerPayload(...)
+  Schemas-->>Pipeline: Validated reviewer payload
+  Pipeline->>ReviewAPI: emit_result(payload)
+  ReviewAPI->>Webhook: HTTP POST JSON payload
+  Webhook-->>ReviewAPI: HTTP 200/201 response
+  ReviewAPI-->>Pipeline: Delivery status
+  Pipeline-->>Main: ReviewerPayload
+  Main-->>Operator: Print final reviewer payload
+```
+
 ### Processing stages
 
 1. **Ingest**: Fetch the primary JSON and referenced documents from object storage. Validate the submission contract before processing.
