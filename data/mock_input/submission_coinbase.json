@@ -8,6 +8,6 @@
         "employee_count": 3400
     },
     "document_uris": [
-        "local://data/raw/coinbase_10k_2024.txt"
+        "local://data/raw/coinbase_10k.txt"
     ]
 }
