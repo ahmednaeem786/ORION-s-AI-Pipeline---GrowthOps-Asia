@@ -86,6 +86,28 @@ sequenceDiagram
   Main-->>Operator: Print final reviewer payload
 ```
 
+### Control Flow and Component Responsibilities
+
+The pipeline follows a linear orchestration pattern. Each component has one primary responsibility and communicates through explicit Python values rather than sharing mutable state:
+
+1. **Application entrypoint (`src/pipeline.py`)**: Creates the pipeline dependencies and starts `process_submission()` with the submission JSON path. This module owns workflow order, not risk policy.
+2. **Input contract (`src/schemas.py`)**: `SubmissionInput` validates the applicant metadata and document references at the boundary. Invalid input stops processing before documents or the LLM are called.
+3. **Document filtering (`src/parser.py`)**: `DocumentParser.process_document()` reads the referenced text file and delegates to `extract_item_1a()`. The parser selects the relevant `Item 1A` section and limits its size before model invocation.
+4. **AI extraction (`src/llm.py`)**: `LLMEngine.extract_risks()` sends only the filtered text to Gemini. The `RiskExtraction` response schema constrains the response, and each result is represented as a `DimensionRisk` containing a rating and evidence.
+5. **Decision synthesis (`src/scoring.py`)**: `RiskScorer` converts qualitative ratings into weighted numeric values, calculates the composite score, maps it to an authorization recommendation, and generates targeted follow-up questions. These operations are deterministic and independent of the LLM.
+6. **Output contract (`src/schemas.py`)**: `ReviewerPayload` validates the assembled result before it leaves the application. This is the final protection against malformed downstream data.
+7. **Delivery adapter (`src/api_client.py`)**: `ReviewAPIClient.emit_result()` serializes the validated payload and sends it to the configured review endpoint. HTTP delivery is isolated behind an adapter so it can be replaced by a cloud API client or test double.
+
+### Engineering Principles Applied
+
+- **Separation of concerns**: orchestration, parsing, model access, scoring, validation, and delivery are kept in separate modules.
+- **Dependency direction**: `pipeline.py` coordinates collaborators; domain decisions remain in `scoring.py` and data contracts remain in `schemas.py`.
+- **Fail-fast validation**: input and output are validated at system boundaries, before expensive model calls or external delivery.
+- **Deterministic core**: the LLM proposes evidence-based risk dimensions, but scoring and authorization thresholds are calculated by ordinary application code.
+- **Replaceable adapters**: the LLM provider, document source, and review API can be replaced without rewriting the orchestration flow.
+- **Traceable execution**: each stage logs its progress and failures, making the run easier to inspect and replay.
+- **Human-in-the-loop control**: the authorization level is a recommendation for analyst review, not an autonomous approval decision.
+
 ### Processing stages
 
 1. **Ingest**: Fetch the primary JSON and referenced documents from object storage. Validate the submission contract before processing.
