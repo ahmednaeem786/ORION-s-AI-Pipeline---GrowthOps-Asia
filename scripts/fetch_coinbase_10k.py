@@ -16,8 +16,9 @@ def download_sec_filing():
     
     print("Fetching Coinbase 10-K from SEC EDGAR...")
     response = requests.get(url, headers=headers)
-    response.raise_for_status()
-    
+    response.raise_for_status() # Ensure we raise an error if the request fails rather than passing down empty data along the LLM wasting resources
+
+    # Strips out HTML tags and extracts the text content. The SEC filings are often messy, so we clean up whitespace and line breaks.
     print("Parsing HTML and extracting text...")
     soup = BeautifulSoup(response.content, "html.parser")
     text = soup.get_text(separator="\n")
@@ -26,7 +27,7 @@ def download_sec_filing():
     lines = [line.strip() for line in text.split("\n") if line.strip()]
     clean_text = "\n".join(lines)
     
-    # Save to local raw directory
+    # Save to local 'raw' directory
     output_dir = Path("data/raw")
     output_dir.mkdir(parents=True, exist_ok=True)
     

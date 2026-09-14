@@ -22,9 +22,9 @@ class DocumentParser:
         # Regex explanation:
         # re.IGNORECASE : Case-insensitive match for the entire pattern
         # re.DOTALL     : Allows the (.*?) to match across newlines
-        # item\s+1a\.?\s+risk\s+factors : Matches "Item 1A. Risk Factors"
-        # (.*?) : Non-greedy match of all text in between
-        # item\s+1b\.?\s+unresolved\s+staff\s+comments : Matches the start of the next section
+        # item\s+1a\.?\s+risk\s+factors : Matches "Item 1A. Risk Factors" (allows varying whitespace '\s+' and missing periods '\.?')
+        # (.*?) : Capturing all text coming after Item 1A up to the next section
+        # item\s+1b\.?\s+unresolved\s+staff\s+comments : Matches the start of the next section allowing to stop when next section is found
         pattern = re.compile(
             r"item\s+1a\.?\s+risk\s+factors(.*?)item\s+1b\.?\s+unresolved\s+staff\s+comments", 
             re.DOTALL | re.IGNORECASE
@@ -37,9 +37,10 @@ class DocumentParser:
             # Fallback: Just return the first 20,000 characters if regex fails
             return text[:20000]
             
-        # The Table of Contents match will be a few characters long. 
-        # The actual body match will be tens of thousands of characters long.
+        # The longest match is likely the most complete and accurate extraction hence we select it
+        # Guarantees that we capture the full Risk Factors section even if there are multiple matches due to formatting inconsistencies
         longest_match = max(matches, key=len)
+
         
         extracted_text = longest_match.strip()
         logger.info(f"Successfully extracted {len(extracted_text)} characters of Risk Factors.")
