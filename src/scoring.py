@@ -60,6 +60,8 @@ class RiskScorer:
     def generate_follow_ups(dimension_risks: list[DimensionRisk]) -> list[str]:
         """
         Generates targeted clarification questions for high-risk flags or gaps.
+        Simply find if there's any dimension flagged as "High" risk, If so, 
+        generates a follow-up question specific to that dimension.
         """
         questions = []
         for item in dimension_risks:
