@@ -5,4 +5,4 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
     volumes:
       - ./data:/app/data
-    command: python -m src.pipeline
+    command: python -m orion
