@@ -54,9 +54,12 @@ class LLMEngine:
             f"2. Regulatory Integrity\n"
             f"3. Financial Solvency\n"
             f"4. Data Security\n\n"
-            f"For each dimension, assign a risk_level ('Low', 'Medium', 'High') and extract a concise "
-            f"quote directly from the text as 'evidence'. Do not invent information. If a dimension "
-            f"is not discussed, assign 'Low' and state 'No explicit risks found in the provided text'."
+            f"For each dimension, extract the following:\n"
+            f"- risk_level: Assign 'Low', 'Medium', or 'High'.\n"
+            f"- rationale: Explain your reasoning for this severity.\n"
+            f"- evidence: Provide a concise, exact quote from the text as proof.\n"
+            f"- mitigating_controls: Extract any defenses or fixes the company claims to have in place for this risk. "
+            f"If a dimension is not discussed, assign 'Low' and state 'No explicit risks found in the provided text'."
         )
 
         try:

@@ -58,7 +58,7 @@ class RiskScorer:
         for item in dimension_risks:
             if item.dimension_name in CRITICAL_DOMAINS and item.risk_level == "High":
                 logger.warning(
-                    f"CRITIAL OVERRIDE TRIGGERED: 'High' risk detected in zero-tolerance domain '{item.dimension_name}'."
+                    f"CRITICAL OVERRIDE TRIGGERED: 'High' risk detected in zero-tolerance domain '{item.dimension_name}'."
                 )
                 return "Requires Supervisory Audit"
 

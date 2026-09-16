@@ -58,9 +58,19 @@ class DimensionRisk(BaseModel):
     risk_level: str = Field(
         ..., description="The assigned risk rating. Must be 'Low', 'Medium', or 'High'."
     )
+    # Encourages Chain of Thought reasoning (also reduces hallucinations and improve reasoning accuracy)
+    rationale: str = Field(
+        ...,
+        description="Brief explanation for choice of risk level. Beneficial for audit-trail reasoning.",
+    )
     evidence: str = Field(
         ...,
         description="Direct quotes or specific facts extracted from the documents justifying this rating.",
+    )
+    # Content for Risk Mitigation and Control Measures (if any)
+    mitigating_controls: str = Field(
+        ...,
+        description="Any existing measures or policies the company has in place to reduce the identified risk. If none, state 'None disclosed'.",
     )
 
 
