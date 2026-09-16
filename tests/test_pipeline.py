@@ -8,20 +8,30 @@ def test_risk_scorer_high():
         DimensionRisk(
             dimension_name="Operational Resilience",
             risk_level="High",
+            rationale="A significant outage could interrupt core services.",
             evidence="Outage risk",
+            mitigating_controls="None disclosed",
         ),
         DimensionRisk(
             dimension_name="Regulatory Integrity",
             risk_level="High",
+            rationale="The submission references regulatory proceedings.",
             evidence="SEC lawsuit",
+            mitigating_controls="None disclosed",
         ),
         DimensionRisk(
             dimension_name="Financial Solvency",
             risk_level="High",
+            rationale="Market volatility could materially affect results.",
             evidence="Price drops",
+            mitigating_controls="None disclosed",
         ),
         DimensionRisk(
-            dimension_name="Data Security", risk_level="High", evidence="Breach"
+            dimension_name="Data Security",
+            risk_level="High",
+            rationale="A breach could expose customer information.",
+            evidence="Breach",
+            mitigating_controls="None disclosed",
         ),
     ]
     score = RiskScorer.calculate_composite_score(risks)
@@ -34,16 +44,32 @@ def test_risk_scorer_high():
 def test_risk_scorer_low():
     risks = [
         DimensionRisk(
-            dimension_name="Operational Resilience", risk_level="Low", evidence="Clean"
+            dimension_name="Operational Resilience",
+            risk_level="Low",
+            evidence="Clean",
+            rationale="No operational risk was identified.",
+            mitigating_controls="Controls disclosed",
         ),
         DimensionRisk(
-            dimension_name="Regulatory Integrity", risk_level="Low", evidence="Clean"
+            dimension_name="Regulatory Integrity",
+            risk_level="Low",
+            evidence="Clean",
+            rationale="No regulatory risk was identified.",
+            mitigating_controls="Controls disclosed",
         ),
         DimensionRisk(
-            dimension_name="Financial Solvency", risk_level="Low", evidence="Profitable"
+            dimension_name="Financial Solvency",
+            risk_level="Low",
+            evidence="Profitable",
+            rationale="The company reports profitable operations.",
+            mitigating_controls="Controls disclosed",
         ),
         DimensionRisk(
-            dimension_name="Data Security", risk_level="Low", evidence="Encrypted"
+            dimension_name="Data Security",
+            risk_level="Low",
+            rationale="The available evidence indicates encryption controls.",
+            evidence="Encrypted",
+            mitigating_controls="Encryption disclosed",
         ),
     ]
     score = RiskScorer.calculate_composite_score(risks)

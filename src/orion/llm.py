@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 # Suppress the Google GenAI SDK's AFC warning while preserving API errors.
 logging.getLogger("google_genai.models").setLevel(logging.ERROR)
 
+RETRYABLE_MODEL_ERRORS = (
+    "429",
+    "500",
+    "502",
+    "503",
+    "504",
+    "DEADLINE_EXCEEDED",
+    "RESOURCE_EXHAUSTED",
+    "UNAVAILABLE",
+)
+
 
 class RiskExtraction(BaseModel):
     """Wrapper schema to force the LLM to return a list of DimensionRisks."""
@@ -30,7 +41,11 @@ class RiskExtraction(BaseModel):
 class LLMEngine:
     """Handles prompt construction and structured API calls to the LLM."""
 
-    def __init__(self, model_name: str = "gemini-3.6-flash"):
+    def __init__(
+        self,
+        model_name: str = "gemini-3.6-flash",
+        fallback_models: list[str] | None = None,
+    ):
         # The genai.Client automatically picks up GEMINI_API_KEY from the environment
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
@@ -39,6 +54,11 @@ class LLMEngine:
             )
         self.client = genai.Client(api_key=api_key)
         self.model = model_name
+        self.fallback_models = list(
+            fallback_models
+            if fallback_models is not None
+            else ["gemini-3.8-flash", "gemini-3.5-flash"]
+        )
 
     def extract_risks(self, text: str, company_name: str) -> list[DimensionRisk]:
         """Evaluates the text and extracts structured risk dimensions."""
@@ -62,28 +82,38 @@ class LLMEngine:
             f"If a dimension is not discussed, assign 'Low' and state 'No explicit risks found in the provided text'."
         )
 
-        try:
-            # The SDK natively forces the LLM to output JSON matching the Pydantic schema
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=text,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    response_mime_type="application/json",
-                    response_schema=RiskExtraction,
-                ),
-            )
+        models_to_try = [self.model, *self.fallback_models]
+        for model_index, model in enumerate(models_to_try):
+            if model_index > 0:
+                logger.info("Trying fallback model: %s", model)
 
-            # The google-genai SDK automatically parses the JSON back into your Pydantic model
-            result = response.parsed
-            logger.info(
-                f"Successfully extracted {len(result.extracted_risks)} risk dimensions."
-            )
-            return result.extracted_risks
+            try:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=text,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        response_mime_type="application/json",
+                        response_schema=RiskExtraction,
+                    ),
+                )
+                result = response.parsed
+                logger.info(
+                    "Successfully extracted %s risk dimensions using %s.",
+                    len(result.extracted_risks),
+                    model,
+                )
+                return result.extracted_risks
+            except Exception as error:
+                is_retryable = any(
+                    marker in str(error) for marker in RETRYABLE_MODEL_ERRORS
+                )
+                if model_index == 0 and not is_retryable:
+                    logger.error("LLM extraction failed: %s", error)
+                    raise
+                logger.warning("Model %s failed: %s", model, error)
 
-        except Exception as e:
-            logger.error(f"LLM extraction failed: {e}")
-            raise
+        raise RuntimeError("LLM extraction failed on all configured models.")
 
 
 if __name__ == "__main__":
