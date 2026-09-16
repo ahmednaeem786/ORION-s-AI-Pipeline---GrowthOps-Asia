@@ -1,5 +1,7 @@
 import logging
+
 import requests
+
 from schemas import ReviewerPayload
 
 logger = logging.getLogger(__name__)
@@ -9,10 +11,20 @@ class ReviewAPIClient:
 
     def __init__(self, endpoint_url: str = "https://httpbin.org/post"):
         self.endpoint_url = endpoint_url
+        # Mock API Key
 
     def emit_result(self, payload: ReviewerPayload) -> bool:
         """Sends the structured payload via HTTP POST with status checking."""
         logger.info(f"Emitting payload for {payload.submission_id} to {self.endpoint_url}")
+
+        payload_headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "X-System-Origin": "ORION-AI-Pipeline",
+            "X-Submission-ID": payload.submission_id,
+            # "X-Submission-Timestamp": payload.submission_timestamp,
+            "X-Risk-Tier": payload.recommended_authorization_level.replace(" ", "-")
+        }
         
         try:
             # We use httpbin.org/post as a live mirror endpoint for testing,
@@ -20,7 +32,7 @@ class ReviewAPIClient:
             response = requests.post(
                 self.endpoint_url,
                 json=payload.model_dump(),
-                headers={"Content-Type": "application/json"},
+                headers=payload_headers,
                 timeout=10
             )
             
