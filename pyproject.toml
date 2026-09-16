@@ -1,0 +1,27 @@
+[tool.ruff]
+# Target Python version
+target-version = "py311"
+# Industry standard line length
+line-length = 88
+
+[tool.ruff.lint]
+# 1. Enable standard rule sets
+select = [
+    "E",   # pycodestyle errors (PEP 8)
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes (unused imports, undefined variables)
+    "I",   # isort (industry standard import sorting)
+    "B",   # flake8-bugbear (catches common design bugs)
+    "C4",  # flake8-comprehensions (optimizes lists/dicts)
+    "UP",  # pyupgrade (forces modern Python syntax)
+]
+
+# 2. Ignore rules that clash with pipeline readability
+ignore = [
+    "E501", # Never split long strings or comments aggressively
+]
+
+[tool.ruff.lint.isort]
+# Groups imports cleanly (Standard library -> Third party (Pandas/PySpark) -> Local files)
+combine-as-imports = true
+lines-after-imports = 2
