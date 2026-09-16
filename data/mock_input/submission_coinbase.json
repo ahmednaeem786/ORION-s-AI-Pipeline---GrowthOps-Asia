@@ -5,7 +5,12 @@
         "jurisdiction": "United States",
         "key_executives": ["Brian Armstrong", "Emilie Choi"],
         "declared_activities": ["Cryptocurrency Exchange", "Digital Asset Custody", "Payment Processing"],
-        "employee_count": 3400
+        "employee_count": 3400,
+        "additional_metadata": {
+            "sec_cik_number": "0001679788",
+            "finCEN_registered": true,
+            "supported_fiat_currencies": ["USD", "EUR", "GBP"]
+        }
     },
     "document_uris": [
         "s3://orion-enterprise-audits/coinbase_10k.txt"

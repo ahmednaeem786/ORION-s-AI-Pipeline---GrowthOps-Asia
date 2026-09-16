@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -21,6 +22,10 @@ class ApplicantMetadata(BaseModel):
         description="List of financial/digital services the firm intends to provide.",
     )
     employee_count: int = Field(..., description="Declared number of employees.")
+    additional_metadata: dict[str, Any] | None = Field(
+        default_factory=dict,
+        description="Flexible key-value store for industry-specific applicant data (e.g., licensing, tech stack, regional identifiers).",
+    )
 
 
 class SubmissionInput(BaseModel):
