@@ -4,7 +4,7 @@ import time
 
 from .api_client import ReviewAPIClient
 from .llm import LLMEngine
-from .parser import DocumentParser
+from .parser import DocumentParser, SectionNotFoundError
 from .schemas import ReviewerPayload, SubmissionInput
 from .scoring import RiskScorer
 
@@ -65,6 +65,9 @@ class OrionPipeline:
                 logger.error(
                     f"Could not locate document at {resolved_path}. Skipping this document."
                 )
+                continue
+            except SectionNotFoundError as e:
+                logger.error(f"Parser error occured for {resolved_path}: {e}")
                 continue
 
         if not aggregated_text.strip():
