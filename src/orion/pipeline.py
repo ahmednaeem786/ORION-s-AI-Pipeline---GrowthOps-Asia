@@ -1,11 +1,11 @@
 import json
 import logging
 import time
-from schemas import SubmissionInput, ReviewerPayload
-from parser import DocumentParser
-from llm import LLMEngine
-from scoring import RiskScorer
-from api_client import ReviewAPIClient
+from .schemas import SubmissionInput, ReviewerPayload
+from .parser import DocumentParser
+from .llm import LLMEngine
+from .scoring import RiskScorer
+from .api_client import ReviewAPIClient
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

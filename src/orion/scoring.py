@@ -1,6 +1,6 @@
 import logging
 
-from schemas import DimensionRisk
+from .schemas import DimensionRisk
 
 
 logger = logging.getLogger(__name__)

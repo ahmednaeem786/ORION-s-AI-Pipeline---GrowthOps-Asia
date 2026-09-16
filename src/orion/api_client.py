@@ -3,7 +3,7 @@ import os
 
 import requests
 
-from schemas import ReviewerPayload
+from .schemas import ReviewerPayload
 
 
 logger = logging.getLogger(__name__)
