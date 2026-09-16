@@ -1,11 +1,13 @@
 import json
 import logging
 import time
-from .schemas import SubmissionInput, ReviewerPayload
-from .parser import DocumentParser
-from .llm import LLMEngine
-from .scoring import RiskScorer
+
 from .api_client import ReviewAPIClient
+from .llm import LLMEngine
+from .parser import DocumentParser
+from .schemas import ReviewerPayload, SubmissionInput
+from .scoring import RiskScorer
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -31,7 +33,7 @@ class OrionPipeline:
         )
 
         # 1. Ingest & validate submission JSON against schema
-        with open(submission_file, "r", encoding="utf-8") as f:
+        with open(submission_file, encoding="utf-8") as f:
             raw_json = json.load(f)
 
         submission_data = SubmissionInput(**raw_json)
@@ -39,17 +41,40 @@ class OrionPipeline:
             f"Ingested submission ID: {submission_data.submission_id} for applicant: {submission_data.applicant.company_name}"
         )
 
-        # 2. Ingest referenced document (abstracting local file path or cloud URI)
-        # We take the primary document referenced
-        doc_uri = submission_data.document_uris[0]
-        resolved_path = doc_uri.replace("local://", "")
+        # 2. Ingesting referenced documents (Handling multi-document data payloads)
+        aggregated_text = ""
+        for doc_uri in submission_data.document_uris:
+            logger.info(f"Retrieving document from URI: {doc_uri}")
 
-        # 3. Parse & filter high-density risk text
-        extracted_text = self.parser.process_document(resolved_path)
+            # Mockup: Retrieving from cloud storages; Amazon Web Services (AWS) S3, Google Cloud Storage (GCS)
+            if doc_uri.startswith("s3://") or doc_uri.startswith("gs://"):
+                logger.info(
+                    "[MOCKUP] Cloud storage detected. In production, boto3/gcs client called. Routed to local mirror for assessment."
+                )
+                # Pointing cloud URI to local mock directory for testing
+                resolved_path = doc_uri.split("/")[-1]
+                resolved_path = f"data/raw/{resolved_path}"
+            else:
+                resolved_path = doc_uri.replace("local://", "")
+
+            # 3. Parse & filter high-density risk text
+            try:
+                extracted_text = self.parser.process_document(resolved_path)
+                aggregated_text += extracted_text + "\n\n--- NEXT DOCUMENT ---\n\n"
+            except FileNotFoundError:
+                logger.error(
+                    f"Could not locate document at {resolved_path}. Skipping this document."
+                )
+                continue
+
+        if not aggregated_text.strip():
+            raise ValueError(
+                "No valid documents were processed. Pipeline cannot continue with LLM extraction."
+            )
 
         # 4. LLM reasoning and extraction
         dimension_risks = self.llm.extract_risks(
-            text=extracted_text, company_name=submission_data.applicant.company_name
+            text=aggregated_text, company_name=submission_data.applicant.company_name
         )
 
         # 5. Deterministic scoring and decision synthesis
