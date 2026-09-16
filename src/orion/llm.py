@@ -14,6 +14,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Suppress the Google GenAI SDK's AFC warning while preserving API errors.
+logging.getLogger("google_genai.models").setLevel(logging.ERROR)
+
 
 class RiskExtraction(BaseModel):
     """Wrapper schema to force the LLM to return a list of DimensionRisks."""
