@@ -6,3 +6,4 @@ Initial Planning.docx
 src/__pycache__/schemas.cpython-313.pyc
 .env
 tests/__pycache__/test_pipeline.cpython-314-pytest-9.1.1.pyc
+src/orion/__pycache__/__main__.cpython-314.pyc

@@ -1,4 +1,3 @@
-import pytest
 from orion.schemas import DimensionRisk
 from orion.scoring import RiskScorer
 from orion.parser import DocumentParser
@@ -26,7 +25,7 @@ def test_risk_scorer_high():
         ),
     ]
     score = RiskScorer.calculate_composite_score(risks)
-    verdict = RiskScorer.determine_authorization_level(score)
+    verdict = RiskScorer.determine_authorization_level(score, risks)
 
     assert score == 5.0
     assert verdict == "Requires Supervisory Audit"
@@ -48,7 +47,7 @@ def test_risk_scorer_low():
         ),
     ]
     score = RiskScorer.calculate_composite_score(risks)
-    verdict = RiskScorer.determine_authorization_level(score)
+    verdict = RiskScorer.determine_authorization_level(score, risks)
 
     assert score == 1.0
     assert verdict == "Full Authorization"

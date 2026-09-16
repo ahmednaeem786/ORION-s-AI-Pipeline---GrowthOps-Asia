@@ -1,270 +1,381 @@
-# ORION Pipeline
+# ORION AI Pipeline
 
-[![Build](https://img.shields.io/badge/build-pending-lightgrey)](../../actions)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
+An AI-assisted pipeline for reviewing authorization submissions for high-risk financial and digital infrastructure services.
 
-An auditable, serverless-oriented AI pipeline for assessing authorization submissions for ORION, the Operational Risk & Integrity Office.
+The pipeline validates a submission, extracts the relevant risk section from a referenced document, asks Gemini for structured risk assessments, applies deterministic scoring rules, builds a reviewer payload, and sends that payload to a downstream HTTP endpoint.
 
-## Executive Summary
+The system is designed for supervised automation: the model produces structured evidence and risk signals, while the final recommendation is calculated by ordinary application code and remains subject to human review.
 
-ORION reviews firms seeking authorization to provide high-risk financial and digital infrastructure services. Each submission combines structured applicant metadata with a potentially large and noisy document set. This project turns those inputs into a validated reviewer payload containing dimension-level risk ratings, deterministic composite scores, a recommended authorization level, evidence references, and targeted clarification questions.
+## Current Status
 
-The design follows **Supervised Automation**. AI is used to extract and interpret relevant evidence; it does not make the final authorization decision. Deterministic scoring, strict data contracts, traceable evidence, and human override fields keep the result reviewable by an analyst and reproducible after the workflow completes.
+The repository is a working local example, not a production authorization service.
 
-Because the assessment does not provide production data or live integrations, the repository includes synthetic input data, a mock PDF audit, and mocked object-storage and review-API clients. These components demonstrate the complete ingestion-to-delivery path without requiring credentials or external services.
+Validated locally:
 
-## System Architecture
+- The package installs in editable mode.
+- All package modules import successfully.
+- The parser processes the bundled Coinbase filing.
+- The submission JSON passes Pydantic validation.
+- The automated test suite passes.
+- The Docker image builds successfully when Docker Desktop is running.
+
+The live end-to-end command requires a valid `GEMINI_API_KEY`. It reaches the Gemini API, but an invalid or expired key stops the run before scoring and delivery.
+
+## Architecture
 
 ```mermaid
 flowchart LR
-    A[Mock Cloud Storage\nJSON + PDF/DOCX/XLSX] --> B[Ingestion and Filtering\nvalidation + targeted sections]
-    B --> C[LLM Risk Assessment\nstructured facts + evidence]
-    C --> D[Composite Scoring and Validation\ndeterministic rules + Pydantic]
-    D --> E[External Webhook Delivery\nreviewer-ready payload]
-    D --> F[Audit Log\nrun ID + hashes + model metadata]
+    A[Submission JSON] --> B[Pydantic validation]
+    B --> C[Referenced text document]
+    C --> D[Item 1A extraction and truncation]
+    D --> E[Gemini structured extraction]
+    E --> F[Deterministic scoring]
+    F --> G[ReviewerPayload validation]
+    G --> H[HTTP delivery]
 ```
 
-## Pipeline Sequence
+The executable entrypoint is:
 
-The sequence below maps the executable call path from `python -m src.pipeline` to the final review API request. The `schemas.py` participant represents Pydantic validation rather than an active service or network call.
-
-```mermaid
-sequenceDiagram
-  autonumber
-  actor Operator
-  participant Main as src/pipeline.py
-  participant Pipeline as OrionPipeline
-  participant Schemas as src/schemas.py
-  participant Parser as src/parser.py
-  participant LLM as src/llm.py
-  participant Gemini as Gemini API
-  participant Scoring as src/scoring.py
-  participant ReviewAPI as src/api_client.py
-  participant Webhook as External review API
-
-  Operator->>Main: Run python -m src.pipeline
-  Main->>Pipeline: OrionPipeline()
-  Pipeline->>LLM: LLMEngine(model_name)
-  LLM->>LLM: load_dotenv() and read GEMINI_API_KEY
-  Pipeline->>Parser: DocumentParser()
-  Pipeline->>Scoring: RiskScorer()
-  Pipeline->>ReviewAPI: ReviewAPIClient()
-
-  Main->>Pipeline: process_submission(submission_file)
-  Pipeline->>Pipeline: open() and json.load(submission_file)
-  Pipeline->>Schemas: SubmissionInput(**raw_json)
-  Schemas-->>Pipeline: Validated submission metadata and document_uris
-  Pipeline->>Pipeline: Resolve first document URI
-  Pipeline->>Parser: process_document(resolved_path)
-  Parser->>Parser: open() and read raw document
-  Parser->>Parser: extract_item_1a(raw_text)
-  Parser->>Parser: Select longest Item 1A to Item 1B match
-  Parser-->>Pipeline: Filtered and token-bounded text
-
-  Pipeline->>LLM: extract_risks(text, company_name)
-  LLM->>Gemini: generate_content(text, response_schema=RiskExtraction)
-  Gemini-->>LLM: Structured JSON response
-  LLM->>Schemas: Parse extracted DimensionRisk items
-  Schemas-->>LLM: Validated risk dimensions
-  LLM-->>Pipeline: list[DimensionRisk]
-
-  Pipeline->>Scoring: calculate_composite_score(dimension_risks)
-  Scoring->>Scoring: Apply risk weights and dimension weights
-  Scoring-->>Pipeline: composite_score
-  Pipeline->>Scoring: determine_authorization_level(score)
-  Scoring-->>Pipeline: authorization recommendation
-  Pipeline->>Scoring: generate_follow_ups(dimension_risks)
-  Scoring-->>Pipeline: follow_up_questions
-
-  Pipeline->>Schemas: ReviewerPayload(...)
-  Schemas-->>Pipeline: Validated reviewer payload
-  Pipeline->>ReviewAPI: emit_result(payload)
-  ReviewAPI->>Webhook: HTTP POST JSON payload
-  Webhook-->>ReviewAPI: HTTP 200/201 response
-  ReviewAPI-->>Pipeline: Delivery status
-  Pipeline-->>Main: ReviewerPayload
-  Main-->>Operator: Print final reviewer payload
+```text
+python -m orion
 ```
 
-### Control Flow and Component Responsibilities
+The workflow is intentionally linear. `OrionPipeline` coordinates the stages but does not contain the scoring policy or model implementation itself.
 
-The pipeline follows a linear orchestration pattern. Each component has one primary responsibility and communicates through explicit Python values rather than sharing mutable state:
+## Processing Flow
 
-1. **Application entrypoint (`src/pipeline.py`)**: Creates the pipeline dependencies and starts `process_submission()` with the submission JSON path. This module owns workflow order, not risk policy.
-2. **Input contract (`src/schemas.py`)**: `SubmissionInput` validates the applicant metadata and document references at the boundary. Invalid input stops processing before documents or the LLM are called.
-3. **Document filtering (`src/parser.py`)**: `DocumentParser.process_document()` reads the referenced text file and delegates to `extract_item_1a()`. The parser selects the relevant `Item 1A` section and limits its size before model invocation.
-4. **AI extraction (`src/llm.py`)**: `LLMEngine.extract_risks()` sends only the filtered text to Gemini. The `RiskExtraction` response schema constrains the response, and each result is represented as a `DimensionRisk` containing a rating and evidence.
-5. **Decision synthesis (`src/scoring.py`)**: `RiskScorer` converts qualitative ratings into weighted numeric values, calculates the composite score, maps it to an authorization recommendation, and generates targeted follow-up questions. These operations are deterministic and independent of the LLM.
-6. **Output contract (`src/schemas.py`)**: `ReviewerPayload` validates the assembled result before it leaves the application. This is the final protection against malformed downstream data.
-7. **Delivery adapter (`src/api_client.py`)**: `ReviewAPIClient.emit_result()` serializes the validated payload and sends it to the configured review endpoint. HTTP delivery is isolated behind an adapter so it can be replaced by a cloud API client or test double.
+1. `orion.__main__` creates an `OrionPipeline` and processes the bundled submission file.
+2. `OrionPipeline` loads `data/mock_input/submission_coinbase.json`.
+3. `SubmissionInput` validates the submission metadata and document references.
+4. The first document URI is resolved by removing the `local://` prefix.
+5. `DocumentParser` reads the referenced text file.
+6. The parser finds the longest section between `Item 1A. Risk Factors` and `Item 1B. Unresolved Staff Comments`.
+7. The extracted section is limited to 60,000 characters before it is sent to the model.
+8. `LLMEngine` sends the text to Gemini using a structured Pydantic response schema.
+9. Gemini returns `DimensionRisk` records for four dimensions.
+10. `RiskScorer` calculates a weighted composite score and authorization recommendation.
+11. `ReviewerPayload` validates the assembled result.
+12. `ReviewAPIClient` sends the payload as an HTTP POST request.
+13. The final payload is printed if all external calls succeed.
 
-### Engineering Principles Applied
+## Package Responsibilities
 
-- **Separation of concerns**: orchestration, parsing, model access, scoring, validation, and delivery are kept in separate modules.
-- **Dependency direction**: `pipeline.py` coordinates collaborators; domain decisions remain in `scoring.py` and data contracts remain in `schemas.py`.
-- **Fail-fast validation**: input and output are validated at system boundaries, before expensive model calls or external delivery.
-- **Deterministic core**: the LLM proposes evidence-based risk dimensions, but scoring and authorization thresholds are calculated by ordinary application code.
-- **Replaceable adapters**: the LLM provider, document source, and review API can be replaced without rewriting the orchestration flow.
-- **Traceable execution**: each stage logs its progress and failures, making the run easier to inspect and replay.
-- **Human-in-the-loop control**: the authorization level is a recommendation for analyst review, not an autonomous approval decision.
+### `src/orion/pipeline.py`
 
-### Processing stages
+`OrionPipeline` is the workflow orchestrator. It creates the parser, LLM engine, scorer, and review API client, then executes them in order through `process_submission()`.
 
-1. **Ingest**: Fetch the primary JSON and referenced documents from object storage. Validate the submission contract before processing.
-2. **Filter**: Extract only sections relevant to the risk dimensions. This bounds tokens, latency, and memory when document sets exceed 100 pages.
-3. **Assess**: Ask the configured LLM provider to return structured facts, risk signals, confidence, and source references. The provider can be replaced with a deterministic mock for local execution.
-4. **Score and validate**: Apply versioned deterministic scoring rules, calculate composite scores, derive an authorization recommendation, and validate the complete payload.
-5. **Deliver**: POST the validated payload to the external review API. Persist structured logs and input/output hashes for audit and replay.
+### `src/orion/schemas.py`
 
-## Design Decisions and Trade-offs
+Defines the Pydantic contracts:
 
-### Token efficiency for serverless execution
+- `ApplicantMetadata`: applicant name, jurisdiction, executives, activities, and employee count.
+- `SubmissionInput`: submission ID, applicant metadata, and document URI list.
+- `DimensionRisk`: a dimension name, risk level, and supporting evidence.
+- `ReviewerPayload`: timestamped output containing risk dimensions, score, recommendation, and follow-up questions.
 
-The workflow does not send an entire document set to the LLM. A targeted extraction stage selects relevant headings, pages, tables, and nearby context for each risk dimension. This reduces token cost and helps keep execution within fixed serverless limits. The trade-off is that extraction rules must be tested against document variations; unclassified or low-confidence material is retained as a review signal rather than silently discarded.
+### `src/orion/parser.py`
 
-### Deterministic scoring
+`DocumentParser` handles the current SEC 10-K text format. It searches case-insensitively for an Item 1A to Item 1B range, chooses the longest match to avoid a table-of-contents match, and truncates the result to 60,000 characters.
 
-The LLM produces evidence and interpretable signals, while composite scores and authorization thresholds are calculated in application code. Versioned weights and thresholds make the recommendation stable across repeated runs and allow analysts to explain how it was derived. A human reviewer can override the recommendation without mutating the original machine-generated assessment.
+If the section markers are not found, it falls back to the first 20,000 characters.
 
-### Auditability and reproducibility
+### `src/orion/llm.py`
 
-Each run receives a correlation ID and records structured events for ingestion, filtering, model invocation, scoring, validation, and delivery. The audit record includes input hashes, selected document references, prompt/model configuration, scoring-policy version, validation results, and output hashes. Secrets and unnecessary document contents are excluded from logs. This supports investigation and replay while respecting data-minimization requirements.
+`LLMEngine` uses the `google-genai` SDK and the `GEMINI_API_KEY` environment variable. The default model is `gemini-3.6-flash`.
 
-### Strict contracts at boundaries
+The model is instructed to assess:
 
-Pydantic models define both the incoming submission and outgoing reviewer payload. Boundary validation catches malformed metadata, unsupported risk values, missing evidence fields, and incompatible schema changes before delivery to the review API.
+- Operational Resilience
+- Regulatory Integrity
+- Financial Solvency
+- Data Security
 
-### Mock-first integration
+The response is requested as JSON matching the `RiskExtraction` Pydantic model, which contains a list of `DimensionRisk` objects.
 
-The mock storage and webhook clients preserve the same interfaces as their production adapters. Local execution therefore exercises orchestration, validation, scoring, logging, and delivery without coupling the core pipeline to a cloud vendor or an LLM API key.
+### `src/orion/scoring.py`
+
+`RiskScorer` is deterministic and independent of the LLM response format beyond the validated risk records.
+
+Risk levels map to numeric values:
+
+| Risk level | Numeric value |
+| --- | ---: |
+| Low | 1.0 |
+| Medium | 2.5 |
+| High | 5.0 |
+
+Dimension weights are:
+
+| Dimension | Weight |
+| --- | ---: |
+| Operational Resilience | 0.20 |
+| Regulatory Integrity | 0.35 |
+| Financial Solvency | 0.15 |
+| Data Security | 0.30 |
+
+Authorization thresholds are:
+
+- Score `<= 1.8`: `Full Authorization`
+- Score `> 1.8` and `<= 3.2`: `Conditional Authorization`
+- Score `> 3.2`: `Requires Supervisory Audit`
+
+A `High` result in `Regulatory Integrity` or `Data Security` overrides the composite score and returns `Requires Supervisory Audit`.
+
+High-risk dimensions also produce targeted follow-up questions. If no high-risk dimension exists, the scorer returns a standard periodic-reporting message.
+
+### `src/orion/api_client.py`
+
+`ReviewAPIClient` sends the validated `ReviewerPayload` to `https://httpbin.org/post` by default. It adds JSON, authorization, submission, timestamp, origin, and risk-tier headers.
+
+The optional `REVIEW_API_KEY` environment variable controls the bearer token. If it is not set, the current implementation uses `mock-api-key`.
+
+A successful response is considered HTTP `200` or `201`. Timeouts, connection errors, and other request errors are logged and return `False`.
+
+### `src/orion/__main__.py`
+
+Provides the normal module entrypoint:
+
+```powershell
+python -m orion
+```
+
+It uses the bundled Coinbase submission path and prints the resulting reviewer payload after the pipeline completes.
 
 ## Repository Structure
 
 ```text
 .
 ├── data/
-│   ├── submission.json          # Synthetic applicant metadata
-│   └── audit_mock.pdf           # Synthetic supporting document
+│   ├── mock_input/
+│   │   └── submission_coinbase.json  # Bundled submission metadata
+│   └── raw/
+│       ├── coinbase_10k.txt          # Raw SEC filing text
+│       └── extracted_item_1a.txt     # Parser-generated/manual extraction sample
+├── scripts/
+│   └── fetch_coinbase_10k.py         # Downloads and cleans the SEC filing
 ├── src/
 │   └── orion/
 │       ├── __init__.py
-│       ├── config.py            # Environment-backed settings
-│       ├── contracts.py         # Pydantic input/output models
-│       ├── ingestion.py         # Storage adapters and file loading
-│       ├── filtering.py         # Targeted document section extraction
-│       ├── assessment.py         # LLM adapter and structured extraction
-│       ├── scoring.py            # Versioned deterministic scoring policy
-│       ├── pipeline.py           # Workflow orchestration
-│       ├── delivery.py           # Review API/webhook adapter
-│       └── main.py               # Local/serverless entry point
+│       ├── __main__.py               # python -m orion entrypoint
+│       ├── api_client.py             # Downstream HTTP adapter
+│       ├── llm.py                    # Gemini adapter
+│       ├── parser.py                 # Item 1A document extraction
+│       ├── pipeline.py               # Workflow orchestration
+│       ├── schemas.py                # Pydantic contracts
+│       └── scoring.py                # Deterministic scoring
 ├── tests/
-│   ├── test_contracts.py
-│   ├── test_filtering.py
-│   ├── test_scoring.py
-│   └── test_pipeline.py
-├── .env.example
+│   └── test_pipeline.py              # Parser and scoring tests
+├── .env                              # Local secrets, not committed
+├── .gitignore
 ├── docker-compose.yml
 ├── Dockerfile
 ├── pyproject.toml
-└── README.md
+├── pytest.ini
+├── README.md
+└── requirements.txt
 ```
 
-## Quick Start
-
-### Prerequisites
+## Requirements
 
 - Python 3.11 or newer
-- Docker and Docker Compose, for container execution
-- An LLM API key only when using a live provider; the default mock mode requires no credentials
+- A valid Gemini API key for the live pipeline command
+- Docker Desktop, if using the container workflow
 
-### Local execution
+The project uses a `src` layout and the installable package name is `orion-ai-pipeline`. The import package name is `orion`.
 
-```bash
-python -m venv .venv
+## Configuration
+
+Create a local `.env` file in the repository root or set environment variables in the shell.
+
+Required for the LLM stage:
+
+```env
+GEMINI_API_KEY=your-valid-gemini-api-key
 ```
 
-Activate the environment:
+Optional for the review API request:
 
-```bash
-# macOS/Linux
-source .venv/bin/activate
+```env
+REVIEW_API_KEY=your-review-api-key
+```
 
-# Windows PowerShell
+`src/orion/llm.py` calls `load_dotenv()` when it is imported, so values in `.env` are available to the LLM engine.
+
+Do not commit `.env` or expose API keys in source code, logs, Docker images, or documentation.
+
+## Installation
+
+Create and activate a virtual environment.
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-Install the project and test dependencies:
+macOS/Linux:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+```
+
+Install the package and development dependencies:
 
 ```bash
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
-Create the local configuration file:
+`pyproject.toml` is the canonical dependency definition. The `dev` extra currently adds pytest. `requirements.txt` delegates to the same editable installation with:
 
-```bash
-cp .env.example .env
+```text
+-e .[dev]
 ```
 
-On Windows PowerShell, use `Copy-Item .env.example .env` instead. Keep mock mode enabled for a credential-free run, then execute:
+## Running Locally
 
-```bash
-python -m orion.main --submission data/submission.json --documents data/audit_mock.pdf
+From the repository root, with a valid Gemini key configured:
+
+```powershell
+python -m orion
 ```
 
-Run the test suite:
+The command processes:
 
-```bash
-pytest
+```text
+data/mock_input/submission_coinbase.json
 ```
 
-### Docker execution
+That submission references:
 
-```bash
-docker-compose up --build
+```text
+data/raw/coinbase_10k.txt
 ```
 
-The Compose configuration runs the same mock end-to-end workflow and writes the reviewer payload and structured audit output to the configured output directory. Production deployment replaces the mock storage and webhook adapters and supplies secrets through the platform secret manager.
+The command contacts both Gemini and the configured review endpoint. It is not a credential-free offline demo.
 
-## Example Reviewer Payload
+## Running Tests
+
+```powershell
+python -m pytest -q
+```
+
+The current test suite covers:
+
+- Weighted high-risk scoring and critical-domain escalation.
+- Weighted low-risk scoring and full authorization.
+- Item 1A parser extraction while excluding the table of contents.
+
+Tests import the installed `orion` package. `pytest.ini` configures test discovery with `testpaths = tests`; it does not add `src` to `PYTHONPATH`.
+
+## Docker
+
+Build the image:
+
+```powershell
+docker build -t orion-ai-pipeline .
+```
+
+Run it directly, supplying the key without putting it in the image:
+
+```powershell
+docker run --rm `
+  -e GEMINI_API_KEY=$env:GEMINI_API_KEY `
+  -v "${PWD}\data:/app/data" `
+  orion-ai-pipeline
+```
+
+Or use Docker Compose:
+
+```powershell
+docker compose up --build
+```
+
+The Compose service:
+
+- Builds from `Dockerfile`.
+- Installs the project with `pip install --no-cache-dir .`.
+- Runs `python -m orion`.
+- Passes through `GEMINI_API_KEY` from the host environment or Compose environment.
+- Mounts the local `data/` directory at `/app/data`.
+
+The Docker image does not rely on `PYTHONPATH=/app/src`.
+
+## Refreshing the Sample Filing
+
+`scripts/fetch_coinbase_10k.py` downloads the configured Coinbase filing from SEC EDGAR, removes HTML markup, normalizes whitespace, and writes:
+
+```text
+data/raw/coinbase_10k.txt
+```
+
+Run it from the repository root:
+
+```powershell
+python scripts/fetch_coinbase_10k.py
+```
+
+The script contains a personal SEC User-Agent string and should be updated with the operator's own contact information before reuse. It performs a live network request and may be subject to SEC access policies.
+
+## Output Shape
+
+A successful run produces a payload shaped like this:
 
 ```json
 {
-  "submission_id": "sub_2026_0001",
-  "run_id": "run_01JQEXAMPLE",
-  "risk_assessment": {
-    "financial_crime": {"rating": "medium", "score": 58, "evidence": ["audit_mock.pdf:p4"]},
-    "cyber_resilience": {"rating": "high", "score": 76, "evidence": ["audit_mock.pdf:p7"]},
-    "governance": {"rating": "low", "score": 24, "evidence": ["submission.json:governance"]}
-  },
-  "composite_score": 52.7,
-  "recommended_authorization_level": "restricted",
-  "follow_up_questions": [
-    "Provide the latest independent penetration-test report and remediation status."
+  "submission_id": "SUB-COINBASE-2026",
+  "submission_timestamp": "2026-09-16T12:00:00+00:00",
+  "dimension_risks": [
+    {
+      "dimension_name": "Data Security",
+      "risk_level": "High",
+      "evidence": "Evidence quoted from the supplied filing"
+    }
   ],
-  "review": {
-    "status": "pending_human_validation",
-    "analyst_override": null
-  },
-  "provenance": {
-    "scoring_policy_version": "2026.1",
-    "model": "mock-risk-assessor",
-    "input_hashes": {"submission.json": "sha256:...", "audit_mock.pdf": "sha256:..."}
-  }
+  "composite_score": 3.8,
+  "recommended_authorization_level": "Requires Supervisory Audit",
+  "follow_up_questions": [
+    "Submit independent penetration testing reports and evidence of account recovery hardening implemented after the cited incident."
+  ]
 }
 ```
 
-## Testing and Evaluation
+The timestamp is generated at runtime. The exact risk records, score, recommendation, and questions depend on the model response and deterministic scoring rules.
 
-The test suite covers schema validation, targeted extraction, deterministic scoring, missing-information flags, mock adapters, and end-to-end payload delivery. Evaluation should include representative long documents, irrelevant-section noise, contradictory evidence, malformed inputs, LLM schema violations, provider timeouts, and webhook retries.
+## Validation Results
 
-## Limitations and Production Extensions
+The current implementation has been checked with:
 
-- The included LLM and integrations are mocks; production deployment requires a vetted provider, authentication, retry policy, and rate-limit handling.
-- PDF, DOCX, and XLSX extraction should be hardened with format-specific parsers and corpus-level regression fixtures.
-- Risk weights, thresholds, and authorization policies require approval from ORION domain experts and should be managed as versioned configuration.
-- Sensitive submissions require encryption, access controls, retention policies, redaction, and monitoring appropriate to regulated data.
+```powershell
+python -m pytest -q
+python -m compileall -q src tests scripts
+python -m pip check
+```
 
-## License
+The bundled parser and input contract were also exercised successfully, and the Docker image built successfully when Docker Desktop was running.
 
-This repository is an assessment submission. No production authorization decision should be made from this example implementation without human review and formal validation.
+The full live command cannot be considered successful until a valid Gemini API key is supplied. With an invalid key, the pipeline stops at the Gemini request with `API_KEY_INVALID` before scoring and HTTP delivery.
+
+## Known Limitations
+
+- The live LLM provider is fixed to the Google Gemini SDK and the default model name is `gemini-3.6-flash`.
+- The parser currently reads text files and is specialized for SEC 10-K Item 1A/1B markers. It does not parse PDF, DOCX, or XLSX files directly.
+- Only the first document URI in `document_uris` is processed.
+- `local://` URI resolution is a simple prefix removal, not a storage abstraction.
+- The review endpoint defaults to httpbin and is not a real authorization system.
+- HTTP delivery has status handling but no retry or backoff policy.
+- Risk levels and dimensions are plain strings rather than constrained enums.
+- The application logs progress but does not currently persist audit records, hashes, run IDs, or model metadata.
+- The current command performs live external calls and has no offline mock mode.
+- Authorization results are recommendations for human review, not autonomous decisions.
+- The sample data is for development and evaluation only.
+
+## Security Notes
+
+- Keep `.env` out of version control.
+- Use a secret manager for container or production deployments.
+- Review the downstream endpoint and bearer-token behavior before sending real submissions.
+- Avoid logging document contents or API credentials.
+- Do not use the sample recommendation as a production authorization decision.
