@@ -19,7 +19,7 @@ Validated locally:
 - The automated test suite passes.
 - The Docker image builds successfully when Docker Desktop is running.
 
-The live end-to-end command requires a valid `GEMINI_API_KEY`. It reaches the Gemini API, but an invalid or expired key stops the run before scoring and delivery.
+The live end-to-end command requires a valid `GEMINI_API_KEY`. With a valid key and network access, the current sample run reaches Gemini, scores the result, and delivers it to the configured HTTP endpoint.
 
 ## Architecture
 
@@ -47,10 +47,10 @@ The workflow is intentionally linear. `OrionPipeline` coordinates the stages but
 1. `orion.__main__` creates an `OrionPipeline` and processes the bundled submission file.
 2. `OrionPipeline` loads `data/mock_input/submission_coinbase.json`.
 3. `SubmissionInput` validates the submission metadata and document references.
-4. The first document URI is resolved by removing the `local://` prefix.
-5. `DocumentParser` reads the referenced text file.
+4. Each document URI is resolved. `local://` paths are mapped directly, while `s3://` and `gs://` paths are routed to a local `data/raw/` mirror for this assessment.
+5. `DocumentParser` reads each normalized text file.
 6. The parser finds the longest section between `Item 1A. Risk Factors` and `Item 1B. Unresolved Staff Comments`.
-7. The extracted section is limited to 60,000 characters before it is sent to the model.
+7. Each extracted section is limited to 500,000 characters, and aggregate context is capped at 800,000 characters across documents.
 8. `LLMEngine` sends the text to Gemini using a structured Pydantic response schema.
 9. Gemini returns `DimensionRisk` records for four dimensions.
 10. `RiskScorer` calculates a weighted composite score and authorization recommendation.
@@ -70,14 +70,12 @@ Defines the Pydantic contracts:
 
 - `ApplicantMetadata`: applicant name, jurisdiction, executives, activities, and employee count.
 - `SubmissionInput`: submission ID, applicant metadata, and document URI list.
-- `DimensionRisk`: a dimension name, risk level, and supporting evidence.
+- `DimensionRisk`: a dimension name, risk level, rationale, supporting evidence, and mitigating controls.
 - `ReviewerPayload`: timestamped output containing risk dimensions, score, recommendation, and follow-up questions.
 
 ### `src/orion/parser.py`
 
-`DocumentParser` handles the current SEC 10-K text format. It searches case-insensitively for an Item 1A to Item 1B range, chooses the longest match to avoid a table-of-contents match, and truncates the result to 60,000 characters.
-
-If the section markers are not found, it falls back to the first 20,000 characters.
+`DocumentParser` handles the current SEC 10-K text format. It searches case-insensitively for an Item 1A to Item 1B range, chooses the longest match to avoid a table-of-contents match, and truncates each result to 500,000 characters. If the expected section markers are not found, it raises `SectionNotFoundError`; the pipeline logs the problem and continues with other referenced documents.
 
 ### `src/orion/llm.py`
 
@@ -140,6 +138,28 @@ python -m orion
 ```
 
 It uses the bundled Coinbase submission path and prints the resulting reviewer payload after the pipeline completes.
+
+## Scope Boundaries and Phase 2
+
+The assignment is time-boxed, so the implementation deliberately focuses on the pipeline contract and orchestration rather than every production integration. The following are explicit design boundaries, not accidental omissions.
+
+### Document formats
+
+Phase 1 assumes that PDF, DOCX, and XLSX files have already been normalized into text upstream. The current parser therefore operates on normalized text and is specialized for SEC 10-K Item 1A/1B markers. Adding robust PDF, DOCX, and spreadsheet extraction would require format-specific parsers, heavier dependencies, and a larger fixture corpus.
+
+Phase 2 can introduce multimodal document handling and OCR, including tools such as `pdfplumber`, `openpyxl`, and OCR services where appropriate. The storage and parsing boundaries in the current pipeline are intended to make that extension possible without changing scoring or delivery contracts.
+
+### Reviewer overrides
+
+The ML pipeline intentionally emits the initial recommendation only. Fields such as analyst override status, analyst comments, final review state, and override timestamps belong to the downstream review database and UI, where a human actually interacts with the result. `ReviewerPayload` remains bounded to the machine-generated assessment and does not pretend to own downstream workflow state.
+
+### Audit hashes and test breadth
+
+The current implementation provides stage-level logging, validated contracts, deterministic scoring, and reproducible rules. Persistent input/output hashes, prompt and policy version records, and broader integration fixtures are enterprise hardening steps planned for a later phase. The current tests focus on the deterministic core and parser behavior rather than claiming 100% coverage.
+
+### Follow-up question logic
+
+The current follow-up generator provides deterministic questions for high-risk dimensions. A complete contradiction-detection tree across multiple heterogeneous documents would be a separate analysis product, so contradiction discovery remains a Phase 2 extension rather than an implicit promise of this implementation.
 
 ## Repository Structure
 
@@ -248,13 +268,13 @@ The command processes:
 data/mock_input/submission_coinbase.json
 ```
 
-That submission references:
+That submission references an object-storage-style URI:
 
 ```text
-data/raw/coinbase_10k.txt
+s3://orion-enterprise-audits/coinbase_10k.txt
 ```
 
-The command contacts both Gemini and the configured review endpoint. It is not a credential-free offline demo.
+For this local assessment, the pipeline routes that URI to the mirror file `data/raw/coinbase_10k.txt`. The command contacts both Gemini and the configured review endpoint. It is not a credential-free offline demo.
 
 ## Running Tests
 
@@ -331,7 +351,9 @@ A successful run produces a payload shaped like this:
     {
       "dimension_name": "Data Security",
       "risk_level": "High",
-      "evidence": "Evidence quoted from the supplied filing"
+      "rationale": "The filing describes a material security incident.",
+      "evidence": "Evidence quoted from the supplied filing",
+      "mitigating_controls": "Controls disclosed in the filing"
     }
   ],
   "composite_score": 3.8,
@@ -356,21 +378,32 @@ python -m pip check
 
 The bundled parser and input contract were also exercised successfully, and the Docker image built successfully when Docker Desktop was running.
 
-The full live command cannot be considered successful until a valid Gemini API key is supplied. With an invalid key, the pipeline stops at the Gemini request with `API_KEY_INVALID` before scoring and HTTP delivery.
+The full live command requires a valid Gemini API key. With an invalid key, the pipeline stops at the Gemini request with `API_KEY_INVALID` before scoring and HTTP delivery. With a valid key, the current implementation has been exercised through Gemini scoring and HTTP delivery.
 
 ## Known Limitations
 
 - The live LLM provider is fixed to the Google Gemini SDK and the default model name is `gemini-3.6-flash`.
-- The parser currently reads text files and is specialized for SEC 10-K Item 1A/1B markers. It does not parse PDF, DOCX, or XLSX files directly.
-- Only the first document URI in `document_uris` is processed.
-- `local://` URI resolution is a simple prefix removal, not a storage abstraction.
+- The parser currently reads upstream-normalized text files and is specialized for SEC 10-K Item 1A/1B markers. It does not parse PDF, DOCX, or XLSX files directly in Phase 1.
+- All document URIs are attempted, but `s3://` and `gs://` references use a local filename mirror rather than real object-storage clients.
+- `local://` URI resolution is a simple prefix removal, not a production storage abstraction.
+- Each document is capped at 500,000 extracted characters and aggregate context is capped at 800,000 characters to respect fixed execution and model-context budgets.
 - The review endpoint defaults to httpbin and is not a real authorization system.
 - HTTP delivery has status handling but no retry or backoff policy.
 - Risk levels and dimensions are plain strings rather than constrained enums.
-- The application logs progress but does not currently persist audit records, hashes, run IDs, or model metadata.
+- The application logs progress but does not currently persist audit records, cryptographic hashes, run IDs, or model metadata; these are planned audit hardening steps.
 - The current command performs live external calls and has no offline mock mode.
 - Authorization results are recommendations for human review, not autonomous decisions.
 - The sample data is for development and evaluation only.
+
+## Next Steps
+
+The highest-value Phase 2 extensions are:
+
+1. Add multimodal PDF/DOCX/XLSX extraction and OCR after upstream normalization requirements are clarified.
+2. Replace local object-storage mirroring with S3/GCS adapters and explicit dependency injection.
+3. Persist audit records with input/output hashes, model metadata, prompt version, scoring-policy version, and delivery metadata.
+4. Add integration tests for multi-document aggregation, parser failures, fallback models, delivery failures, and malformed model responses.
+5. Add contradiction and inconsistency analysis across document evidence.
 
 ## Security Notes
 

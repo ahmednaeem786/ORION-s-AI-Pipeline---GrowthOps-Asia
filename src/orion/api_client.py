@@ -12,10 +12,31 @@ logger = logging.getLogger(__name__)
 class ReviewAPIClient:
     """Dispatches validated reviewer payloads to an external downstream API."""
 
-    def __init__(self, endpoint_url: str = "https://httpbin.org/post"):
-        self.endpoint_url = endpoint_url
+    def __init__(self):
+        # self.endpoint_url = endpoint_url
         # Mock API Key for testing; in production, this should be set in the environment
         self.api_key = os.environ.get("REVIEW_API_KEY", "mock-api-key")
+
+        self.session = requests.Session()
+        self.viewer_url = None
+
+        try:
+            # Requesting a new unique webhook token
+            response = self.session.post("https://webhook.site/token", timeout=5)
+            response.raise_for_status()
+            token = response.json()["uuid"]
+
+            # Endpoint for posting the data to the webhook.site service
+            self.endpoint_url = f"https://webhook.site/{token}"
+            # Viewer URL for human inspection of the received payload
+            self.viewer_url = f"https://webhook.site/#!/{token}"
+            logger.info(f"Reviewer UI successfully generated.")
+        except Exception as e:
+            # Fail-safe: If webhook.site is unreachable, fallback to a headless endpoint (httpbin) for testing.
+            logger.warning(
+                f"Could not generate dynamic UI. Falling back to headless httpbin. Error: {e}"
+            )
+            self.endpoint_url = "https://httpbin.org/post"
 
     def emit_result(self, payload: ReviewerPayload) -> bool:
         """Sends the structured payload via HTTP POST with status checking."""
@@ -46,6 +67,10 @@ class ReviewAPIClient:
                 logger.info(
                     f"Successfully delivered payload for {payload.submission_id} (HTTP {response.status_code})."
                 )
+                if self.viewer_url:
+                    logger.info(
+                        f"Payload can be viewed at: {self.viewer_url} (for human inspection)."
+                    )
                 return True
             else:
                 logger.warning(

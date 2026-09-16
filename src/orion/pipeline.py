@@ -61,6 +61,11 @@ class OrionPipeline:
             try:
                 extracted_text = self.parser.process_document(resolved_path)
                 aggregated_text += extracted_text + "\n\n--- NEXT DOCUMENT ---\n\n"
+                if len(aggregated_text) > 800000:
+                    logger.warning(
+                        "Maximum aggregate context reached. Skipping remaining documents."
+                    )
+                    break
             except FileNotFoundError:
                 logger.error(
                     f"Could not locate document at {resolved_path}. Skipping this document."
@@ -96,7 +101,11 @@ class OrionPipeline:
             follow_up_questions=follow_ups,
         )
         # 7. Emit the final payload to the review API
-        self.api_client.emit_result(output_payload)
+        success = self.api_client.emit_result(output_payload)
+        if not success:
+            raise RuntimeError(
+                "Pipeline execution failed: Delivery to external API was unsuccessful."
+            )
 
         elapsed = round(time.time() - start_time, 2)
         logger.info(
