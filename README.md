@@ -123,7 +123,9 @@ High-risk dimensions also produce targeted follow-up questions. If no high-risk 
 
 ### `src/orion/api_client.py`
 
-`ReviewAPIClient` sends the validated `ReviewerPayload` to `https://httpbin.org/post` by default. It adds JSON, authorization, submission, timestamp, origin, and risk-tier headers.
+`ReviewAPIClient` first requests a temporary capture endpoint from `https://webhook.site/token`. When successful, it sends the validated `ReviewerPayload` to that unique webhook URL and logs a viewer URL for human inspection. If webhook.site cannot be reached, it falls back to `https://httpbin.org/post`.
+
+The client adds JSON, authorization, submission, timestamp, origin, and risk-tier headers. The dynamically created webhook is intended for demonstration and inspection, not production data.
 
 The optional `REVIEW_API_KEY` environment variable controls the bearer token. If it is not set, the current implementation uses `mock-api-key`.
 
@@ -303,6 +305,7 @@ Run it directly, supplying the key without putting it in the image:
 ```powershell
 docker run --rm `
   -e GEMINI_API_KEY=$env:GEMINI_API_KEY `
+  -e REVIEW_API_KEY=$env:REVIEW_API_KEY `
   -v "${PWD}\data:/app/data" `
   orion-ai-pipeline
 ```
@@ -319,6 +322,7 @@ The Compose service:
 - Installs the project with `pip install --no-cache-dir .`.
 - Runs `python -m orion`.
 - Passes through `GEMINI_API_KEY` from the host environment or Compose environment.
+- The current Compose file does not pass `REVIEW_API_KEY`; without a Compose override, the client uses its built-in `mock-api-key` default.
 - Mounts the local `data/` directory at `/app/data`.
 
 The Docker image does not rely on `PYTHONPATH=/app/src`.
@@ -387,7 +391,7 @@ The full live command requires a valid Gemini API key. With an invalid key, the 
 - All document URIs are attempted, but `s3://` and `gs://` references use a local filename mirror rather than real object-storage clients.
 - `local://` URI resolution is a simple prefix removal, not a production storage abstraction.
 - Each document is capped at 500,000 extracted characters and aggregate context is capped at 800,000 characters to respect fixed execution and model-context budgets.
-- The review endpoint defaults to httpbin and is not a real authorization system.
+- Review delivery dynamically uses webhook.site when available and falls back to httpbin; neither endpoint is a real authorization system.
 - HTTP delivery has status handling but no retry or backoff policy.
 - Risk levels and dimensions are plain strings rather than constrained enums.
 - The application logs progress but does not currently persist audit records, cryptographic hashes, run IDs, or model metadata; these are planned audit hardening steps.
